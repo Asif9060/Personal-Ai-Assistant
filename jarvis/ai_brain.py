@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 import json
 import time
+import uuid
 from typing import Optional, Dict, List
 from datetime import datetime
 
@@ -24,11 +25,18 @@ try:
 except ImportError:
     REQUESTS_AVAILABLE = False
 
+# Memory system import
+try:
+    from .memory import JarvisMemory
+    MEMORY_AVAILABLE = True
+except ImportError:
+    MEMORY_AVAILABLE = False
+
 
 class AIBrain:
     """AI Brain for JARVIS - Generates intelligent responses using free AI APIs"""
 
-    def __init__(self):
+    def __init__(self, audio_io=None):
         # Load environment variables
         try:
             from dotenv import load_dotenv
@@ -42,7 +50,21 @@ class AIBrain:
         self.ai_model = os.getenv("JARVIS_AI_MODEL", "llama-3.1-8b-instant")
         self.personality = os.getenv("JARVIS_PERSONALITY", "helpful_assistant")
 
-        # Conversation history
+        # Audio reference for voice commands
+        self.audio_io = audio_io
+
+        # Session management
+        self.session_id = str(uuid.uuid4())
+
+        # Memory system
+        if MEMORY_AVAILABLE:
+            self.memory = JarvisMemory()
+            print("[AI] Memory system initialized")
+        else:
+            self.memory = None
+            print("[AI] Memory system not available")
+
+        # Conversation history (in-memory backup)
         self.conversation_history: List[Dict[str, str]] = []
         self.max_history = int(os.getenv("JARVIS_MAX_HISTORY", "10"))
 
@@ -114,10 +136,24 @@ Current context:
         print(f"[AI] Processing: '{user_input}'")
 
         try:
-            # Try Groq API first
+            # Check for task-related commands first
+            task_response = self._handle_task_commands(user_input)
+            if task_response:
+                return task_response
+
+            # Check for memory/reminder commands
+            memory_response = self._handle_memory_commands(user_input)
+            if memory_response:
+                return memory_response
+
+            # Try Groq API for general conversation
             if self.client and self.ai_provider == "groq":
                 response = self._groq_response(user_input)
                 if response:
+                    # Save conversation to memory
+                    if self.memory:
+                        self.memory.save_conversation(
+                            user_input, response, self.session_id)
                     self._add_to_history(user_input, response)
                     return response
 
@@ -253,6 +289,171 @@ Current context:
             print(
                 f"[AI] Available personalities: {list(self.personalities.keys())}")
             return False
+
+    def _clean_task_text(self, user_input: str, remove_time_words: bool = True) -> str:
+        """Clean up task text by removing command phrases and time words"""
+        task_text = user_input.lower()
+
+        # Remove command phrases
+        phrases_to_remove = [
+            "remind me to", "remind me", "add task", "task for",
+            "remember to", "i need to", "don't forget to", "don't forget",
+            "make a note to", "make a note", "add reminder", "create task"
+        ]
+
+        for phrase in phrases_to_remove:
+            task_text = task_text.replace(phrase, "")
+
+        # Remove time words if requested
+        if remove_time_words:
+            time_words = ["tomorrow", "next week", "today", "later"]
+            for word in time_words:
+                task_text = task_text.replace(word, "")
+
+        # Clean up and capitalize
+        task_text = task_text.strip()
+        if task_text.startswith("that "):
+            task_text = task_text[5:]  # Remove "that " prefix
+
+        return task_text.capitalize() if task_text else "Reminder"
+
+    def _handle_task_commands(self, user_input: str) -> Optional[str]:
+        """Handle task-related commands"""
+        if not self.memory:
+            return None
+
+        user_lower = user_input.lower()
+
+        # Add task/reminder - enhanced with more natural phrases
+        if any(phrase in user_lower for phrase in [
+            "remind me", "add task", "task for", "remember to", "i need to",
+            "don't forget", "make a note", "add reminder", "create task"
+        ]):
+            # Extract task details
+            task_text = user_input
+
+            # Check for time-based reminders
+            if "tomorrow" in user_lower:
+                from datetime import datetime, timedelta
+                due_date = (datetime.now() + timedelta(days=1)
+                            ).strftime('%Y-%m-%d')
+
+                # Clean up the task text
+                task_text = self._clean_task_text(
+                    user_input, remove_time_words=True)
+
+                if self.memory.add_task(task_text, due_date=due_date, priority="medium"):
+                    return f"I'll remind you tomorrow: {task_text}"
+                else:
+                    return "I had trouble saving that reminder. Please try again."
+
+            elif "next week" in user_lower:
+                from datetime import datetime, timedelta
+                due_date = (datetime.now() + timedelta(days=7)
+                            ).strftime('%Y-%m-%d')
+
+                # Clean up the task text
+                task_text = self._clean_task_text(
+                    user_input, remove_time_words=True)
+
+                if self.memory.add_task(task_text, due_date=due_date, priority="medium"):
+                    return f"I'll remind you next week: {task_text}"
+                else:
+                    return "I had trouble saving that reminder. Please try again."
+
+            else:
+                # General task without specific date
+                if any(phrase in user_lower for phrase in ["remind me", "add task", "remember to", "i need to", "don't forget", "make a note", "add reminder", "create task"]):
+                    # Clean up the task text
+                    task_text = self._clean_task_text(
+                        user_input, remove_time_words=False)
+
+                    if self.memory.add_task(task_text, priority="medium"):
+                        return f"I've noted that down: {task_text}"
+                    else:
+                        return "I had trouble saving that task. Please try again."
+
+        # Handle "remember" differently - for preferences, not tasks
+        if "remember that" in user_lower or "remember this" in user_lower:
+            # This is for storing preferences/context, not tasks
+            return None  # Let it be handled by regular AI response
+
+        # Show tasks/reminders
+        if any(phrase in user_lower for phrase in ["my tasks", "my reminders", "what do i need to do", "show tasks", "current tasks"]):
+            tasks = self.memory.get_pending_tasks()
+            if not tasks:
+                return "You don't have any pending tasks at the moment."
+
+            task_list = []
+            for i, task in enumerate(tasks[:5], 1):  # Show up to 5 tasks
+                due_info = f" (due {task['due_date']})" if task['due_date'] else ""
+                priority_info = f" [{task['priority']}]" if task['priority'] != 'medium' else ""
+                task_list.append(
+                    f"{i}. {task['title']}{due_info}{priority_info}")
+
+            tasks_text = "\n".join(task_list)
+            return f"Here are your pending tasks:\n{tasks_text}"
+
+        # Complete task
+        if any(phrase in user_lower for phrase in ["done with", "completed", "finished", "mark complete"]):
+            # For now, just acknowledge - could be enhanced to identify specific tasks
+            return "Great! If you tell me which specific task number, I can mark it as completed."
+
+        return None
+
+    def _handle_memory_commands(self, user_input: str) -> Optional[str]:
+        """Handle memory-related commands"""
+        if not self.memory:
+            return None
+
+        user_lower = user_input.lower()
+
+        # Store preferences/context
+        if "remember that" in user_lower or "remember this" in user_lower:
+            # Extract the preference
+            preference = user_input.lower()
+            preference = preference.replace(
+                "remember that", "").replace("remember this", "").strip()
+
+            # Store as context
+            if preference:
+                # Create a key from the preference
+                key = f"preference_{len(preference.split())}"
+                self.memory.store_context(key, preference, "preferences")
+                return f"I'll remember that: {preference}"
+            else:
+                return "What would you like me to remember?"
+
+        # Memory statistics
+        if any(phrase in user_lower for phrase in ["memory stats", "what do you remember", "memory status"]):
+            stats = self.memory.get_memory_stats()
+            return f"Memory Status:\n- Conversations: {stats.get('conversations', 0)}\n- Tasks: {stats.get('pending_tasks', 0)}\n- Context entries: {stats.get('context_entries', 0)}"
+
+        return None
+
+    def get_startup_reminders(self) -> List[str]:
+        """Get reminders to show when JARVIS starts up"""
+        if not self.memory:
+            return []
+
+        reminders = []
+
+        # Get due tasks/reminders
+        due_tasks = self.memory.get_due_reminders()
+        if due_tasks:
+            reminders.append(
+                f"You have {len(due_tasks)} tasks that need attention:")
+            for task in due_tasks[:3]:  # Show up to 3 most important
+                due_info = f" (due {task['due_date']})" if task['due_date'] else ""
+                reminders.append(f"• {task['title']}{due_info}")
+
+        # Get memory stats
+        stats = self.memory.get_memory_stats()
+        if stats.get('pending_tasks', 0) > 0:
+            reminders.append(
+                f"📝 You have {stats['pending_tasks']} pending tasks")
+
+        return reminders
 
 
 # Convenience function for easy import

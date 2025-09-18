@@ -14,7 +14,8 @@ class Assistant:
     def __init__(self):
         self.audio = AudioIO()
         self.nlu = NLU()
-        self.ai_brain = AIBrain()  # AI brain for intelligent responses
+        # Pass audio reference for voice switching
+        self.ai_brain = AIBrain(audio_io=self.audio)
 
         print(f"[JARVIS] {self.ai_brain.get_status()}")
 
@@ -57,10 +58,25 @@ class Assistant:
         return self.ai_brain.generate_response(intent.text)
 
     def run(self) -> None:
-        """Main conversation loop with AI-powered responses"""
+        """Main conversation loop with AI-powered responses and memory integration"""
         startup_message = "JARVIS AI assistant online. How can I help you?"
         print(f"Jarvis: {startup_message}")
         self.audio.speak(startup_message)
+
+        # Show startup reminders
+        reminders = self.ai_brain.get_startup_reminders()
+        if reminders:
+            print("\n[Startup Reminders]")
+            for reminder in reminders:
+                print(f"  {reminder}")
+
+            # Speak the most important reminder
+            if len(reminders) > 0:
+                reminder_message = reminders[0]
+                if len(reminders) > 1:
+                    reminder_message += f" Plus {len(reminders) - 1} other items."
+                print(f"Jarvis: {reminder_message}")
+                self.audio.speak(reminder_message)
 
         while True:
             print("[Listening...]")
@@ -75,6 +91,9 @@ class Assistant:
                 reply = "Goodbye! Have a great day!"
                 print(f"Jarvis: {reply}")
                 self.audio.speak(reply, chime=True)
+
+                # Cleanup session
+                self.ai_brain.cleanup_session()
                 break
 
             # Parse intent and generate AI response

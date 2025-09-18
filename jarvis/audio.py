@@ -117,32 +117,46 @@ class TTS:
 
     async def _async_synthesize_and_play(self, text: str) -> None:
         """Async method to synthesize and play speech"""
-        # Generate unique filename
-        text_hash = hash(text) % 1000000
-        output_file = self.temp_dir / f"speech_{text_hash}.mp3"
+        # Generate unique filename with timestamp to avoid conflicts
+        import time
+        text_hash = abs(hash(text)) % 1000000
+        timestamp = int(time.time() * 1000) % 1000000
+        output_file = self.temp_dir / f"speech_{text_hash}_{timestamp}.mp3"
 
-        # Create TTS communication
-        communicate = edge_tts.Communicate(
-            text=text,
-            voice=self.voice_name,
-            rate=self._rate
-        )
-
-        # Save audio to file
-        await communicate.save(str(output_file))
-
-        # Play the generated audio
-        self._play_audio(str(output_file))
-
-        # Clean up the temporary file
         try:
-            output_file.unlink()
-        except Exception:
-            pass  # Don't fail if cleanup fails
+            # Create TTS communication
+            communicate = edge_tts.Communicate(
+                text=text,
+                voice=self.voice_name,
+                rate=self._rate
+            )
+
+            # Save audio to file
+            await communicate.save(str(output_file))
+
+            # Play the generated audio
+            self._play_audio(str(output_file))
+
+        except Exception as e:
+            print(f"[TTS] Speech synthesis error: {e}")
+            raise
+        finally:
+            # Clean up the temporary file
+            try:
+                if output_file.exists():
+                    # Wait a brief moment for file to be released
+                    import time
+                    time.sleep(0.1)
+                    output_file.unlink()
+            except Exception:
+                pass  # Don't fail if cleanup fails
 
     def _play_audio(self, file_path: str) -> None:
         """Play audio file using pygame"""
         try:
+            # Stop any current playback
+            pygame.mixer.music.stop()
+
             # Load and play with pygame
             pygame.mixer.music.load(file_path)
             pygame.mixer.music.set_volume(self._volume)
@@ -170,6 +184,24 @@ class TTS:
             pygame.mixer.music.stop()
         except Exception:
             pass
+
+    def change_voice(self, new_voice: str) -> bool:
+        """Change the voice dynamically"""
+        try:
+            old_voice = self.voice_name
+            self._voice_pref = new_voice
+            self._select_voice()
+
+            if self.voice_name != old_voice:
+                print(
+                    f"[TTS] Voice changed from {old_voice} to {self.voice_name}")
+                return True
+            else:
+                print(f"[TTS] Voice remains: {self.voice_name}")
+                return False
+        except Exception as e:
+            print(f"[TTS] Failed to change voice: {e}")
+            return False
 
     def list_available_voices(self) -> list:
         """List available Edge TTS voices"""
