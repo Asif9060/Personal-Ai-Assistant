@@ -1,0 +1,17 @@
+SpeechRecognition>=3.10.0
+# For Windows, prebuilt PyAudio wheels are recommended; pipwin can help
+PyAudio>=0.2.14; platform_system=="Windows"
+pyttsx3>=2.90
+pyautogui>=0.9.54
+selenium>=4.22.0
+webdriver-manager>=4.0.2
+python-dotenv>=1.0.1
+# For Windows SAPI direct access (better TTS reliability)
+comtypes>=1.1.14; platform_system=="Windows"
+# Coqui TTS for realistic neural voices
+TTS>=0.22.0
+torch>=2.0.0
+torchaudio>=2.0.0
+soundfile>=0.12.1
+pydub>=0.25.1
+simpleaudio>=1.0.4
