@@ -141,18 +141,63 @@ class TTS:
             print(f"[TTS] Speech synthesis error: {e}")
             raise
         finally:
-            # Clean up the temporary file
+            # Clean up the temporary file with improved deletion
+            self._cleanup_audio_file(output_file)
+
+    def _cleanup_audio_file(self, file_path: Path) -> None:
+        """Robustly clean up audio files with retry mechanism"""
+        max_retries = 3
+        for attempt in range(max_retries):
             try:
-                if output_file.exists():
-                    # Wait a brief moment for file to be released
-                    import time
-                    time.sleep(0.1)
-                    output_file.unlink()
+                if file_path.exists():
+                    # Ensure pygame has released the file
+                    pygame.mixer.music.stop()
+                    pygame.mixer.music.unload()
+
+                    # Wait a moment for file system to release
+                    time.sleep(0.1 * (attempt + 1))  # Increasing delay
+
+                    # Attempt to delete
+                    file_path.unlink()
+                    print(f"[TTS] Cleaned up audio file: {file_path.name}")
+                    break
+            except (PermissionError, OSError) as e:
+                if attempt == max_retries - 1:
+                    print(
+                        f"[TTS] Warning: Could not delete {file_path.name} after {max_retries} attempts")
+                    # Schedule for cleanup later
+                    self._schedule_cleanup(file_path)
+                else:
+                    time.sleep(0.2)  # Wait before retry
             except Exception:
-                pass  # Don't fail if cleanup fails
+                break  # Don't fail the whole operation
+
+    def _schedule_cleanup(self, file_path: Path) -> None:
+        """Schedule file for cleanup later (for files that couldn't be deleted immediately)"""
+        try:
+            # Add to a cleanup list or use a background thread
+            # For now, just try again after a longer delay
+            import threading
+
+            def delayed_cleanup():
+                time.sleep(5)  # Wait 5 seconds
+                try:
+                    if file_path.exists():
+                        pygame.mixer.music.stop()
+                        pygame.mixer.music.unload()
+                        file_path.unlink()
+                        print(
+                            f"[TTS] Delayed cleanup successful: {file_path.name}")
+                except Exception:
+                    pass  # Silent fail for delayed cleanup
+
+            thread = threading.Thread(target=delayed_cleanup, daemon=True)
+            thread.start()
+        except Exception:
+            pass  # Don't fail if threading doesn't work
 
     def _play_audio(self, file_path: str) -> None:
-        """Play audio file using pygame"""
+        """Play audio file using pygame with proper cleanup"""
         try:
             # Stop any current playback
             pygame.mixer.music.stop()
@@ -164,7 +209,11 @@ class TTS:
 
             # Wait for playback to complete
             while pygame.mixer.music.get_busy():
-                time.sleep(0.1)
+                time.sleep(0.05)  # Fast polling for responsiveness
+
+            # Ensure pygame releases the file by stopping and unloading
+            pygame.mixer.music.stop()
+            pygame.mixer.music.unload()  # This releases the file handle
 
         except Exception as e:
             print(f"[TTS] Audio playback failed: {e}")
