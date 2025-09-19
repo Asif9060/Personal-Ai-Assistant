@@ -33,7 +33,7 @@ print()
 
 print("🎭 PERSONALITY OPTIONS:")
 personalities = {
-    "tony_stark_jarvis": "Sophisticated, calls you 'Sir/Ma'am', like Tony Stark's JARVIS",
+    "tony_stark_jarvis": "Sophisticated, calls you 'Boss', like Tony Stark's JARVIS",
     "helpful_assistant": "Friendly and helpful general assistant",
     "professional": "Formal and business-like responses",
     "casual_friend": "Conversational and warm, like talking to a friend",

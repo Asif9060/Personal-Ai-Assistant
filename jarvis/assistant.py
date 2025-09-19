@@ -59,24 +59,58 @@ class Assistant:
 
     def run(self) -> None:
         """Main conversation loop with AI-powered responses and memory integration"""
-        startup_message = "JARVIS AI assistant online. How can I help you?"
+        # Get startup reminders first to customize greeting
+        reminders = self.ai_brain.get_startup_reminders()
+
+        # Customize startup message based on tasks
+        if reminders and not any("no pending tasks" in reminder.lower() for reminder in reminders):
+            startup_message = "JARVIS AI assistant online. Let me update you on your tasks."
+        else:
+            startup_message = "JARVIS AI assistant online. How can I help you?"
+
         print(f"Jarvis: {startup_message}")
         self.audio.speak(startup_message)
 
-        # Show startup reminders
-        reminders = self.ai_brain.get_startup_reminders()
+        # Announce specific tasks
         if reminders:
             print("\n[Startup Reminders]")
             for reminder in reminders:
                 print(f"  {reminder}")
 
-            # Speak the most important reminder
+            # Create a comprehensive spoken announcement
             if len(reminders) > 0:
-                reminder_message = reminders[0]
-                if len(reminders) > 1:
-                    reminder_message += f" Plus {len(reminders) - 1} other items."
-                print(f"Jarvis: {reminder_message}")
-                self.audio.speak(reminder_message)
+                # Build a natural spoken message
+                spoken_message = ""
+                task_lines = [r for r in reminders if r.startswith("•")]
+
+                if task_lines:
+                    # Extract the main announcement
+                    main_announcement = next(
+                        (r for r in reminders if not r.startswith("•") and not r.startswith("...")), "")
+                    if main_announcement:
+                        spoken_message = main_announcement + " "
+
+                    # Add the specific tasks in a natural way
+                    # Limit to 3 tasks to avoid long speech
+                    for i, task_line in enumerate(task_lines[:3]):
+                        task_text = task_line.replace("• ", "").replace(
+                            "(high priority)", "which is high priority")
+                        if i == 0:
+                            spoken_message += task_text
+                        elif i == len(task_lines) - 1 and len(task_lines) > 1:
+                            spoken_message += f", and {task_text}"
+                        else:
+                            spoken_message += f", {task_text}"
+
+                    # Add count info if more tasks exist
+                    if len(task_lines) > 3:
+                        spoken_message += f", plus {len(task_lines) - 3} more tasks"
+                else:
+                    # No specific tasks, just use the first reminder
+                    spoken_message = reminders[0]
+
+                print(f"Jarvis: {spoken_message}")
+                self.audio.speak(spoken_message)
 
         while True:
             print("[Listening...]")
@@ -96,14 +130,18 @@ class Assistant:
                 self.ai_brain.cleanup_session()
                 break
 
-            # Parse intent and generate AI response
-            intent = self.nlu.parse(text)
-            if not intent:
-                # If NLU fails, still use AI for response
-                reply = self.ai_brain.generate_response(text)
+            # Use AI for response directly (skip NLU parsing for speed)
+            # Only handle critical intents for performance
+            text_lower = text.lower()
+            if "what time" in text_lower or "current time" in text_lower:
+                now = datetime.now().strftime("%I:%M %p").lstrip("0")
+                reply = f"It's {now}."
+            elif "what date" in text_lower or "today's date" in text_lower:
+                today = datetime.now().strftime("%A, %B %d, %Y")
+                reply = f"Today is {today}."
             else:
-                reply = self.handle_intent(
-                    intent) or "I'm not sure how to respond to that."
+                # Use AI brain for all other responses (faster than NLU parsing)
+                reply = self.ai_brain.generate_response(text)
 
             print(f"Jarvis: {reply}")
             if reply:

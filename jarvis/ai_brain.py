@@ -75,7 +75,7 @@ class AIBrain:
         # JARVIS personality prompts
         self.personalities = {
             "helpful_assistant": "You are JARVIS, a helpful AI assistant. Be concise, friendly, and informative. Keep responses under 2 sentences unless asked for details.",
-            "tony_stark_jarvis": "You are JARVIS, Tony Stark's AI assistant. Be sophisticated, slightly witty, and efficient. Address the user as 'Sir' or 'Ma'am' occasionally. Keep responses brief but elegant.",
+            "tony_stark_jarvis": "You are JARVIS, Tony Stark's AI assistant. Be sophisticated, slightly witty, and efficient. Address the user as 'Boss' occasionally. Keep responses brief but elegant.",
             "professional": "You are JARVIS, a professional AI assistant. Be formal, precise, and business-like. Provide clear, actionable responses.",
             "casual_friend": "You are JARVIS, a casual and friendly AI companion. Be conversational, warm, and approachable. Use natural language and be helpful.",
             "technical_expert": "You are JARVIS, a technical AI assistant specializing in programming and technology. Be precise, use technical language when appropriate, and provide detailed technical explanations."
@@ -432,28 +432,74 @@ Current context:
         return None
 
     def get_startup_reminders(self) -> List[str]:
-        """Get reminders to show when JARVIS starts up"""
+        """Get reminders to show when JARVIS starts up - announces specific tasks"""
         if not self.memory:
             return []
 
         reminders = []
 
-        # Get due tasks/reminders
+        # Get due tasks/reminders first (high priority)
         due_tasks = self.memory.get_due_reminders()
         if due_tasks:
-            reminders.append(
-                f"You have {len(due_tasks)} tasks that need attention:")
+            reminders.append("You have urgent tasks that need attention:")
             for task in due_tasks[:3]:  # Show up to 3 most important
-                due_info = f" (due {task['due_date']})" if task['due_date'] else ""
+                due_info = f" due {task['due_date']}" if task['due_date'] else ""
                 reminders.append(f"• {task['title']}{due_info}")
 
-        # Get memory stats
-        stats = self.memory.get_memory_stats()
-        if stats.get('pending_tasks', 0) > 0:
+        # Get all pending tasks and announce them specifically
+        all_pending_tasks = self.memory.get_pending_tasks()
+        if all_pending_tasks:
+            # Filter out tasks already mentioned in due_tasks
+            due_task_ids = {task.get('id')
+                            for task in due_tasks} if due_tasks else set()
+            remaining_tasks = [task for task in all_pending_tasks if task.get(
+                'id') not in due_task_ids]
+
+            if remaining_tasks:
+                if len(remaining_tasks) == 1:
+                    reminders.append("You have one pending task:")
+                else:
+                    reminders.append(
+                        f"You have {len(remaining_tasks)} pending tasks:")
+
+                # Announce up to 5 tasks specifically
+                for task in remaining_tasks[:5]:
+                    due_info = f" due {task['due_date']}" if task.get(
+                        'due_date') else ""
+                    priority_info = f" (high priority)" if task.get(
+                        'priority') == 'high' else ""
+                    reminders.append(
+                        f"• {task['title']}{due_info}{priority_info}")
+
+                # If there are more than 5, mention the count
+                if len(remaining_tasks) > 5:
+                    reminders.append(
+                        f"...and {len(remaining_tasks) - 5} more tasks")
+
+        # If no tasks at all
+        if not due_tasks and not all_pending_tasks:
             reminders.append(
-                f"📝 You have {stats['pending_tasks']} pending tasks")
+                "You have no pending tasks. How can I help you today?")
 
         return reminders
+
+    def cleanup_session(self) -> None:
+        """Clean up the current session and save any pending data"""
+        if self.memory:
+            try:
+                # Save any final conversation state
+                print("[AI] Cleaning up session and saving data...")
+
+                # You could add any cleanup logic here, such as:
+                # - Saving conversation summaries
+                # - Updating user preferences
+                # - Closing database connections gracefully
+
+                print("[AI] Session cleanup completed")
+            except Exception as e:
+                print(f"[AI] Warning: Session cleanup error: {e}")
+        else:
+            print("[AI] Session ended (no memory system)")
 
 
 # Convenience function for easy import
