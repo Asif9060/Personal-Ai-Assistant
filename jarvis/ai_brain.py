@@ -32,6 +32,13 @@ try:
 except ImportError:
     MEMORY_AVAILABLE = False
 
+# Browser control import
+try:
+    from .browser import VoiceBrowser, BrowserCommandParser
+    BROWSER_AVAILABLE = True
+except ImportError:
+    BROWSER_AVAILABLE = False
+
 
 class AIBrain:
     """AI Brain for JARVIS - Generates intelligent responses using free AI APIs"""
@@ -63,6 +70,16 @@ class AIBrain:
         else:
             self.memory = None
             print("[AI] Memory system not available")
+
+        # Browser control system
+        if BROWSER_AVAILABLE:
+            self.browser = VoiceBrowser()
+            self.browser_parser = BrowserCommandParser(self.browser)
+            print("[AI] Browser control system initialized")
+        else:
+            self.browser = None
+            self.browser_parser = None
+            print("[AI] Browser control not available")
 
         # Conversation history (in-memory backup)
         self.conversation_history: List[Dict[str, str]] = []
@@ -122,8 +139,9 @@ Current context:
 - Date: {current_date}
 - You are running on a Windows system
 - You have voice synthesis capabilities
+- You have browser control capabilities - you can open browsers, search, navigate, bookmark pages, and control tabs
 - Keep responses conversational and concise (1-2 sentences typically)
-- If asked about your capabilities, mention you can help with questions, provide information, and assist with various tasks
+- If asked about your capabilities, mention you can help with questions, provide information, assist with various tasks, and control web browsers through voice commands
 """
         return context_prompt.strip()
 
@@ -136,6 +154,11 @@ Current context:
         print(f"[AI] Processing: '{user_input}'")
 
         try:
+            # Check for browser commands first
+            browser_response = self._handle_browser_commands(user_input)
+            if browser_response:
+                return browser_response
+
             # Check for task-related commands first
             task_response = self._handle_task_commands(user_input)
             if task_response:
@@ -431,6 +454,45 @@ Current context:
 
         return None
 
+    def _handle_browser_commands(self, user_input: str) -> Optional[str]:
+        """Handle browser-related voice commands"""
+        if not self.browser_parser:
+            return None
+
+        user_lower = user_input.lower()
+
+        # Check if this is a browser-related command
+        browser_keywords = [
+            'browser', 'open browser', 'launch browser', 'search', 'google',
+            'navigate', 'go to', 'visit', 'bookmark', 'back', 'forward',
+            'refresh', 'new tab', 'close tab', 'switch tab', 'scroll',
+            'click', 'page title', 'current url', 'where am i', 'result',
+            'first result', 'second result', 'third result', 'open first',
+            'click first', 'list results', 'show results', 'list links'
+        ]
+
+        is_browser_command = any(
+            keyword in user_lower for keyword in browser_keywords)
+
+        if not is_browser_command:
+            return None
+
+        try:
+            action, response, params = self.browser_parser.parse_command(
+                user_input)
+
+            if action != "unknown":
+                print(f"[AI] Browser command executed: {action}")
+                # Add to conversation history
+                self._add_to_history(user_input, response)
+                return response
+            else:
+                return None  # Let regular AI handle it
+
+        except Exception as e:
+            print(f"[AI] Browser command error: {e}")
+            return "Sorry Boss, I encountered an error with that browser command."
+
     def get_startup_reminders(self) -> List[str]:
         """Get reminders to show when JARVIS starts up - announces specific tasks"""
         if not self.memory:
@@ -500,6 +562,14 @@ Current context:
                 print(f"[AI] Warning: Session cleanup error: {e}")
         else:
             print("[AI] Session ended (no memory system)")
+
+        # Clean up browser if active
+        if self.browser and self.browser.is_active:
+            try:
+                print("[AI] Closing browser...")
+                self.browser.close_browser()
+            except Exception as e:
+                print(f"[AI] Warning: Browser cleanup error: {e}")
 
 
 # Convenience function for easy import
