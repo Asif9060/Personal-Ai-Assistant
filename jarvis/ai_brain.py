@@ -39,6 +39,13 @@ try:
 except ImportError:
     BROWSER_AVAILABLE = False
 
+# Application launcher import
+try:
+    from .applications import ApplicationLauncher, ApplicationDiscovery
+    APPLICATIONS_AVAILABLE = True
+except ImportError:
+    APPLICATIONS_AVAILABLE = False
+
 
 class AIBrain:
     """AI Brain for JARVIS - Generates intelligent responses using free AI APIs"""
@@ -80,6 +87,16 @@ class AIBrain:
             self.browser = None
             self.browser_parser = None
             print("[AI] Browser control not available")
+
+        # Application launcher system
+        if APPLICATIONS_AVAILABLE:
+            self.app_discovery = ApplicationDiscovery()
+            self.app_launcher = ApplicationLauncher(self.app_discovery)
+            print("[AI] Application launcher system initialized")
+        else:
+            self.app_discovery = None
+            self.app_launcher = None
+            print("[AI] Application launcher not available")
 
         # Conversation history (in-memory backup)
         self.conversation_history: List[Dict[str, str]] = []
@@ -154,6 +171,11 @@ Current context:
         print(f"[AI] Processing: '{user_input}'")
 
         try:
+            # Check for application launch commands first
+            app_response = self._handle_application_commands(user_input)
+            if app_response:
+                return app_response
+
             # Check for browser commands first
             browser_response = self._handle_browser_commands(user_input)
             if browser_response:
@@ -451,6 +473,124 @@ Current context:
         if any(phrase in user_lower for phrase in ["memory stats", "what do you remember", "memory status"]):
             stats = self.memory.get_memory_stats()
             return f"Memory Status:\n- Conversations: {stats.get('conversations', 0)}\n- Tasks: {stats.get('pending_tasks', 0)}\n- Context entries: {stats.get('context_entries', 0)}"
+
+        return None
+
+    def _handle_application_commands(self, user_input: str) -> Optional[str]:
+        """Handle application launch commands using fuzzy matching"""
+        if not self.app_launcher:
+            return None
+
+        user_lower = user_input.lower()
+
+        # Check if this is an application command (launch or close)
+        app_keywords = [
+            'open', 'launch', 'start', 'run', 'execute', 'play',
+            'close', 'kill', 'stop', 'quit', 'exit', 'end',
+            'app', 'application', 'program', 'software', 'game'
+        ]
+
+        is_app_command = any(keyword in user_lower for keyword in app_keywords)
+
+        if not is_app_command:
+            return None
+
+        try:
+            # Check if this is a close command
+            close_keywords = ['close', 'kill', 'stop', 'quit', 'exit', 'end']
+            is_close_command = any(
+                keyword in user_lower for keyword in close_keywords)
+
+            # Extract app name from command
+            app_name = self._extract_app_name(user_input, is_close_command)
+            if not app_name:
+                action = "close" if is_close_command else "open"
+                return f"I couldn't identify which application you want to {action}."
+
+            if is_close_command:
+                # Close the application
+                result = self.app_launcher.close_application_by_name(app_name)
+
+                if result['success']:
+                    response = f"Successfully closed {result['app_name']}"
+                    print(f"[AI] Application closed: {result['app_name']}")
+                    # Add to conversation history
+                    self._add_to_history(user_input, response)
+                    return response
+                else:
+                    return result['message']
+            else:
+                # Launch the application
+                result = self.app_launcher.launch_application_by_name(app_name)
+
+                if result['success']:
+                    response = f"Successfully launched {result['app_name']}"
+                    print(f"[AI] Application launched: {result['app_name']}")
+                    # Add to conversation history
+                    self._add_to_history(user_input, response)
+                    return response
+                else:
+                    suggestions = result.get('suggestions', [])
+                    if suggestions:
+                        suggestion_text = ", ".join(
+                            [f"'{app['name']}'" for app in suggestions[:3]])
+                        return f"Application '{app_name}' not found. Did you mean: {suggestion_text}?"
+                    else:
+                        return f"Application '{app_name}' not found."
+
+        except Exception as e:
+            print(f"[AI] Error in application commands: {e}")
+            return "Sorry, I encountered an error while trying to launch the application."
+
+    def _extract_app_name(self, user_input: str, is_close_command: bool = False) -> Optional[str]:
+        """Extract application name from user command"""
+        user_lower = user_input.lower().strip()
+
+        # Common command patterns for both open and close
+        if is_close_command:
+            patterns = [
+                r'(?:close|kill|stop|quit|exit|end)\s+(.+)',
+                r'(.+)\s+(?:close|kill|stop|quit|exit|end)',
+                r'i want to (?:close|kill|stop|quit|exit|end)\s+(.+)',
+                r'can you (?:close|kill|stop|quit|exit|end)\s+(.+)',
+                r'please (?:close|kill|stop|quit|exit|end)\s+(.+)',
+            ]
+        else:
+            patterns = [
+                r'(?:open|launch|start|run|execute|play)\s+(.+)',
+                r'(.+)\s+(?:open|launch|start|run|execute|play)',
+                r'i want to (?:open|launch|start|run|execute|play)\s+(.+)',
+                r'can you (?:open|launch|start|run|execute|play)\s+(.+)',
+                r'please (?:open|launch|start|run|execute|play)\s+(.+)',
+            ]
+
+        for pattern in patterns:
+            import re
+            match = re.search(pattern, user_lower)
+            if match:
+                app_name = match.group(1).strip()
+                # Clean up common words
+                cleanup_words = ['the', 'app', 'application',
+                                 'program', 'software', 'game', 'please', 'for me']
+                words = app_name.split()
+                cleaned_words = [
+                    word for word in words if word not in cleanup_words]
+                if cleaned_words:
+                    return ' '.join(cleaned_words)
+
+        # If no pattern matches, try to extract from the entire input
+        # Remove common command words
+        if is_close_command:
+            command_words = ['close', 'kill', 'stop', 'quit', 'exit',
+                             'end', 'i', 'want', 'to', 'can', 'you', 'please', 'jarvis']
+        else:
+            command_words = ['open', 'launch', 'start', 'run', 'execute',
+                             'play', 'i', 'want', 'to', 'can', 'you', 'please', 'jarvis']
+        words = user_lower.split()
+        app_words = [word for word in words if word not in command_words]
+
+        if app_words:
+            return ' '.join(app_words)
 
         return None
 
